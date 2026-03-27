@@ -1,0 +1,325 @@
+# --- LLM (discovery hints, quality advisory, optional zero-shot annotation) ---
+llm:
+  backend: google_genai
+  model: gemini-3-flash-preview
+  api_key: GEMINI_API_KEY
+  base_url: PROXY_URL
+  temperature: 0.0
+  max_tokens: 2048
+  timeout: 60
+
+# --- Source connectors (timeouts, tokens; scrape is required for forum collection) ---
+connectors:
+  hf_dataset:
+    timeout: 60
+    token: null
+  kaggle:
+    download_dir: null
+  github_dataset:
+    timeout: 30
+    token: null
+  http_file:
+    timeout: 30
+  api:
+    timeout: 30
+    retries: 2
+  scrape:
+    timeout: 30
+    auto_scrape:
+      enabled: true
+      timeout: 25
+      probe_render_fallback: true
+
+# --- Discovery ranking and providers ---
+discovery:
+  allow_demo_fallback: false
+  strict_provider_check: true
+  enable_llm_query_planner: false
+  max_queries_per_provider: 4
+  max_query_length: 120
+  required_providers: ["web_forum"]
+
+  scoring:
+    topical_relevance: 0.45
+    platform_trust: 0.15
+    metadata_richness: 0.10
+    modality_fit: 0.10
+    task_fit: 0.10
+    language_fit: 0.10
+
+  providers:
+    huggingface:
+      enabled: true
+      timeout: 20
+      retries: 1
+      rate_limit_per_second: 2.0
+      max_results_per_query: 5
+      token: null
+
+    github:
+      enabled: true
+      timeout: 20
+      retries: 1
+      rate_limit_per_second: 1.0
+      max_results_per_query: 5
+      token: null
+
+    kaggle:
+      enabled: true
+      timeout: 20
+      retries: 1
+      rate_limit_per_second: 1.0
+      max_results_per_query: 5
+      username: null
+      key: null
+      command: "kaggle"
+
+    web_forum:
+      enabled: true
+      timeout: 25
+      retries: 1
+      rate_limit_per_second: 0.5
+      max_results_per_query: 5
+      allow_domains: []
+      deny_domains: ["facebook.com", "instagram.com", "linkedin.com"]
+      user_agent: null
+      auto_probe_executable: true
+      probe_render_fallback: true
+
+    devtools_har:
+      enabled: true
+      timeout: 15
+      retries: 0
+      hints: []
+
+# --- Collection: topic profile, schema hints, defaults for the pipeline profile ---
+collection:
+  topic: "Public health forum questions and medical discussion threads for urgency classification"
+
+  topic_profile:
+    domain: health_forums
+    source_type: public_web_forums
+    description: >
+      Collect public health-related forum posts and questions from open pages.
+      One row should represent one initial user question or first post in a thread.
+
+    allowed_sources:
+      - public forum listing pages
+      - public thread pages
+      - public Q&A pages
+      - public JSON/API endpoints discovered from network requests
+
+    excluded_sources:
+      - private communities
+      - paywalled content
+      - pages requiring login
+      - user profile pages
+      - direct messaging pages
+
+    pii_policy:
+      drop_direct_contacts: true
+      drop_usernames_if_possible: true
+      redact_emails: true
+      redact_phone_numbers: true
+      redact_urls_in_text: false
+
+    target_schema:
+      unit: "one question or first post"
+      text_fields:
+        - title
+        - body
+        - text
+      metadata_fields:
+        - source
+        - source_type
+        - source_url
+        - collected_at
+        - thread_id
+        - created_at
+        - forum_section
+        - reply_count
+        - tags
+
+  defaults:
+    modality: text
+    language: english
+    task_type: classification
+    size_target: 15000
+    max_merged_rows: 20000
+    stratify_column: source
+    stratify_random_state: 42
+    needs_labels: true
+
+# --- Per-project artifact root ---
+storage:
+  artifacts_dir: "artifacts/health_forum_pipeline"
+
+# --- Data quality (text cleanup, duplicates, language, PII) ---
+quality:
+  project_root: "."
+  text_column: "text"
+  title_column: "title"
+  body_column: "body"
+  label_column: "label"
+
+  duplicate_subset: ["text"]
+  critical_text_columns: ["text"]
+  normalized_text_columns: ["text", "title", "body"]
+
+  min_text_length: 30
+  max_text_length: 8000
+  drop_empty_text: true
+  drop_near_duplicates: true
+  near_duplicate_similarity: 0.95
+
+  imbalance_ratio_threshold: 3.0
+  zscore_threshold: 3.0
+
+  language_filter:
+    enabled: true
+    allow_languages: ["en"]
+
+  pii_redaction:
+    enabled: true
+    redact_emails: true
+    redact_phone_numbers: true
+    redact_user_handles: true
+
+  storage:
+    reports_dir: "reports/quality"
+    interim_dir: "data/interim"
+    review_dir: "review"
+
+# --- Annotation: single-level labels + rich label definitions ---
+annotation:
+  task_name: "health_forum_urgency_classification"
+  modality: text
+  unit_of_annotation: "One forum question or first post in a thread."
+  text_column: "text"
+  label_column: "label"
+
+  confidence_threshold: 0.72
+  margin_threshold: 0.10
+  review_queue_max_rows: 3000
+
+  labelstudio_strict_labels: true
+  export_format: "labelstudio"
+
+  labels:
+    - emergency_red_flag
+    - non_emergency_medical
+    - information_only
+    - non_medical_or_offtopic
+
+  label_definitions:
+    emergency_red_flag:
+      description: >
+        Possible acute emergency, severe harm risk, or instructions to seek immediate in-person care.
+      decision_rules:
+        - Symptoms or context suggest time-critical medical danger, for example crushing chest pain, stroke signs, suicide intent.
+        - User describes inability to breathe, uncontrolled bleeding, or loss of consciousness.
+      canonical_examples:
+        - "Chest pain radiating to my arm for 20 minutes — should I wait until tomorrow?"
+        - "I took a whole bottle of pills; what should I do?"
+
+    non_emergency_medical:
+      description: >
+        Clearly health-related but not an immediate life-threatening emergency in the text.
+      decision_rules:
+        - Medical symptoms, medications, or conditions without red-flag urgency language.
+        - Follow-up or chronic condition questions appropriate for routine care.
+      canonical_examples:
+        - "Muscle ache after flu — normal recovery or see a doctor?"
+        - "Can I take ibuprofen if I'm on lisinopril?"
+
+    information_only:
+      description: >
+        Seeks general health information, definitions, or policy without a personal acute episode.
+      decision_rules:
+        - Educational or factual questions not tied to an urgent personal crisis.
+      canonical_examples:
+        - "What is the difference between Type 1 and Type 2 diabetes?"
+
+    non_medical_or_offtopic:
+      description: >
+        Not a health question or wholly unrelated to medical content.
+      decision_rules:
+        - No meaningful health-related ask in the post.
+      canonical_examples:
+        - "Best GPU for gaming under $500?"
+
+  review_rules:
+    send_to_review_if_low_confidence: true
+    send_to_review_if_small_margin: true
+    send_to_review_if_empty_text: true
+    send_to_review_if_red_flag_terms: true
+
+# --- Label Studio export paths ---
+label_studio:
+  enabled: true
+  project_title: "Health Forum Urgency Classification"
+  input_text_field: "text"
+  output_label_field: "label"
+  prediction_score_field: "confidence"
+  export_dir: "artifacts/label_studio"
+  task_file: "labelstudio_import.json"
+  config_file: "label_config.xml"
+
+# --- Human review placeholders (HITL queues) ---
+human_review:
+  enabled: true
+  stage: "post_annotation"
+  input_file: "review/review_queue.csv"
+  corrected_file: "review/review_queue_corrected.csv"
+  require_corrected_file: false
+
+# --- Active learning ---
+active_learning:
+  enabled: true
+  strategy: margin
+  query_size: 20
+  initial_seed_size: 12
+  n_iterations: 2
+  compare_against_random: true
+  simulation_mode: true
+  random_state: 42
+  test_holdout_fraction: 0.2
+  test_holdout_min: 2
+  history_path: "reports/al_history.json"
+
+# --- Final training: TF-IDF + LogisticRegression baseline (sklearn) ---
+training:
+  enabled: true
+  task_type: text_classification
+  test_size: 0.2
+  random_state: 42
+  metric_primary: f1_macro
+
+  metrics:
+    - accuracy
+    - f1_macro
+    - precision_macro
+    - recall_macro
+
+  model_output_dir: "models"
+
+  tfidf:
+    max_features: 30000
+    ngram_min: 1
+    ngram_max: 2
+    min_df: 1
+    max_df: 1.0
+    sublinear_tf: true
+    token_pattern: "(?u)\\b\\w+\\b"
+
+  logistic_regression:
+    C: 1.0
+    max_iter: 2000
+    class_weight: balanced
+    solver: lbfgs
+
+# --- Pipeline orchestration flags (read by orchestration / annotate gating) ---
+pipeline:
+  run_annotation: true
+  fail_if_text_missing: false
+  skip_annotation_if_needs_labels_false: true

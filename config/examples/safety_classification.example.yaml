@@ -1,0 +1,12 @@
+# Example: legacy moderation / safety classification (three labels).
+# Copy relevant blocks into your config or use as a separate --config for demos.
+# Do not set annotation.labels — the agent then loads the built-in safety label set.
+
+annotation:
+  task_name: safety_classification
+  modality: text
+  text_column: "text"
+  confidence_threshold: 0.70
+  margin_threshold: 0.12
+  backend: rule_based
+# Omit annotation.labels to use safe / borderline_safe / unsafe from code (task_configs._legacy_safety_classification_task_config).
