@@ -719,43 +719,6 @@ artifacts/runs/<run_id>/
 
 ---
 
-## Smoke tests
-
-### Basic pipeline smoke test
-
-```bash
-pip install -r requirements.txt
-pytest tests/ -q
-python run_pipeline.py --help
-```
-
-### Connector-related environment setup
-
-```bash
-export HF_TOKEN="YOUR_HF_TOKEN"
-export GITHUB_TOKEN="YOUR_GITHUB_TOKEN"
-export KAGGLE_USERNAME="YOUR_KAGGLE_USERNAME"
-export KAGGLE_KEY="YOUR_KAGGLE_KEY"
-```
-
-If using Kaggle, confirm the CLI is installed:
-
-```bash
-which kaggle
-```
-
-### Connector smoke commands
-
-```bash
-python3 -m unittest discover -s tests -p "test_hf_connector.py"
-python3 -m unittest discover -s tests -p "test_kaggle_connector.py"
-python3 -m unittest discover -s tests -p "test_github_connector.py"
-python3 -m unittest discover -s tests -p "test_http_file_connector.py"
-pytest tests/test_pipeline_collect_canonical_ux.py -q
-```
-
----
-
 ## Internal debug REPL
 
 This command exists only for debugging `DataCollectionAgent`:
